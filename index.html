@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:,">
+<title>失踪的胡萝卜到底是不是时间的尽头——为什么7个居民也能是小镇啊喂？</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=VT323&family=Press+Start+2P&family=DotGothic16&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/fonts/fusion-pixel/Fusion-Pixel-12px-Proportional-Simplified-Chinese.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ===== 场景层 ===== -->
+  <div id="scene">
+    <div class="scene-bleed" id="bg-bleed"></div>
+    <div class="scene-frame">
+      <div class="scene-layer" id="bg-a"></div>
+      <div class="scene-layer" id="bg-b"></div>
+    </div>
+    <div class="scene-fog"></div>
+    <div class="dust" id="dust"></div>
+    <div id="sprites"></div>
+  </div>
+
+  <!-- ===== HUD ===== -->
+  <header id="hud">
+    <div class="hud-left">
+      <div class="brand"><span class="brand-mark">▲</span><span>蔬菜镇 · 时间档案</span></div>
+      <div class="chapter-chip" id="chapter-label">序章 · 锚点丢失</div>
+    </div>
+    <div class="hud-right">
+      <button class="pix-btn small" id="btn-clueboard" title="查看已收集的线索">线索墙</button>
+      <button class="pix-btn small" id="btn-archive3d" title="3D 角色档案">3D 档案</button>
+      <button class="pix-btn small" id="btn-sound" title="声音开关">SFX ON</button>
+    </div>
+  </header>
+
+  <div class="clock-chip" id="clock-chip">
+    <span class="clock-label">蔬菜镇时间</span>
+    <span class="clock-value" id="clock-value">??:??</span>
+  </div>
+
+  <!-- ===== 每一幕的 UI ===== -->
+  <main id="stage-ui"></main>
+
+  <!-- ===== 对话框 ===== -->
+  <section id="dialogue" class="dialogue hidden">
+    <div class="portrait left" id="dlg-portrait-left"><img alt=""></div>
+    <div class="dlg-box">
+      <div class="tape tl"></div><div class="tape br"></div>
+      <div class="dlg-speaker" id="dlg-speaker">旁白</div>
+      <div class="dlg-text" id="dlg-text"></div>
+      <div class="dlg-foot">
+        <span class="dlg-hint" id="dlg-hint">点击继续 ▼</span>
+        <div class="dlg-actions" id="dlg-actions"></div>
+      </div>
+    </div>
+    <div class="portrait right" id="dlg-portrait-right"><img alt=""></div>
+  </section>
+
+  <!-- ===== 弹层根 ===== -->
+  <div id="overlay-root"></div>
+
+  <!-- ===== 全屏效果 ===== -->
+  <div class="flash" id="flash"></div>
+  <div class="crt"></div>
+  <div class="vignette"></div>
+  <div class="grain"></div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
