@@ -112,7 +112,64 @@
         [392, 0], [392, 220], [440, 440], [392, 660], [523, 900], [494, 1200],
         [392, 1600], [392, 1820], [440, 2040], [392, 2260], [587, 2500], [523, 2800]
       ];
-      mel.forEach(([f, dl]) => setTimeout(() => this.tone(f, 0.42, 'triangle', 0.05), dl));
+      const playOnce = () => {
+        if (!state.sound || !state._bdayOn) return;
+        mel.forEach(([f, dl]) => setTimeout(() => this.tone(f, 0.42, 'triangle', 0.05), dl));
+      };
+      state._bdayOn = true;
+      playOnce();
+      state._bdayId = setInterval(playOnce, 3200);
+    },
+    stopBday() {
+      state._bdayOn = false;
+      if (state._bdayId) { clearInterval(state._bdayId); state._bdayId = null; }
+    },
+    /* Lo-Fi 环境音：低频嗡鸣 + 遥远钟表滴答，用于前六幕悬疑氛围 */
+    ambient() {
+      if (!state.sound) return;
+      this.init();
+      if (!this.ctx) return;
+      this.stopAmbient();
+      const t = this.ctx.currentTime;
+      const drone = this.ctx.createOscillator();
+      const droneG = this.ctx.createGain();
+      drone.type = 'sine'; drone.frequency.value = 110;
+      droneG.gain.value = 0.012;
+      drone.connect(droneG).connect(this.ctx.destination);
+      drone.start(t);
+      this._drone = drone;
+      this._ambientId = setInterval(() => {
+        if (!state.sound) return;
+        this.tone(820, 0.025, 'square', 0.008);
+        setTimeout(() => this.tone(620, 0.02, 'square', 0.006), 180);
+      }, 2400);
+    },
+    stopAmbient() {
+      if (this._drone) { try { this._drone.stop(); } catch (e) {} this._drone = null; }
+      if (this._ambientId) { clearInterval(this._ambientId); this._ambientId = null; }
+    },
+    /* 拆弹紧迫 8-bit 电子节拍 */
+    bombBeat() {
+      if (!state.sound) return;
+      this.init();
+      if (!this.ctx) return;
+      this.stopBombBeat();
+      let step = 0;
+      this._bombId = setInterval(() => {
+        if (!state.sound) return;
+        const kick = step % 4 === 0;
+        const hat = step % 2 === 1;
+        if (kick) this.tone(60, 0.12, 'sine', 0.13);
+        if (hat) this.noise(0.04, 0.025, 8000);
+        if (step % 8 === 4) this.tone(180, 0.08, 'square', 0.05);
+        step++;
+      }, 150);
+    },
+    stopBombBeat() {
+      if (this._bombId) { clearInterval(this._bombId); this._bombId = null; }
+    },
+    stopAll() {
+      this.stopAmbient(); this.stopBombBeat(); this.stopBday();
     },
     music() {
       if (!state.sound) return;
@@ -124,6 +181,14 @@
   /* ================= 场景 ================= */
   let sceneSlot = 0;
   let currentScene = '';
+  // WebP 支持检测：优先用 WebP，不支持则回退 jpg
+  const SCENE_EXT = (() => {
+    try {
+      const c = document.createElement('canvas');
+      c.width = 1; c.height = 1;
+      return c.toDataURL('image/webp').indexOf('data:image/webp') === 0 ? 'webp' : 'jpg';
+    } catch (e) { return 'jpg'; }
+  })();
   function setScene(name, { dim = false, instant = false } = {}) {
     if (!name) return;
     const layers = [$('#bg-a'), $('#bg-b')];
@@ -131,8 +196,8 @@
     const cur = layers[sceneSlot];
     if (currentScene === name && next.classList.contains('on')) return;
 
-    next.style.backgroundImage = `url(assets/scenes/${name}.jpg)`;
-    $('#bg-bleed').style.backgroundImage = `url(assets/scenes/${name}.jpg)`;
+    next.style.backgroundImage = `url(assets/scenes/${name}.${SCENE_EXT})`;
+    $('#bg-bleed').style.backgroundImage = `url(assets/scenes/${name}.${SCENE_EXT})`;
     next.classList.toggle('dim', dim);
     if (instant) {
       next.style.transition = 'none';
@@ -432,6 +497,7 @@
 
   function startGame() {
     state.started = true;
+    audio.ambient();
     act1();
   }
 
@@ -483,6 +549,7 @@
     const loc = D.clueLocations.find(l => l.id === state.loc);
     setScene(loc.scene, { dim: false });
     const got = state.collected.size;
+    const isTouch = window.matchMedia('(pointer: coarse)').matches;
     const hotspotHTML = loc.hotspots.map(h => {
       const done = state.collected.has(h.id);
       return `<button class="hotspot ${done ? 'done' : ''}" style="left:${h.x}%;top:${h.y}%"
@@ -499,11 +566,11 @@
             `<button class="loc-tab ${l.id === loc.id ? 'active' : ''}" data-loc="${l.id}">${l.name}</button>`
           ).join('')}
         </div>
-        <div class="hotspot-frame spot-mode" id="spot-frame">
+        <div class="hotspot-frame spot-mode ${isTouch ? 'touch-mode' : ''}" id="spot-frame">
           ${hotspotHTML}
           <div class="spot-overlay" id="spot-overlay" style="z-index:30"></div>
         </div>
-        <div class="spot-hint">移动光斑 · 照亮可疑的地方</div>
+        <div class="spot-hint">${isTouch ? '点击发光的可疑区域' : '移动光斑 · 照亮可疑的地方'}</div>
         <div class="progress-chip">线索 <b>${got}</b> / 6</div>
         <div class="tip-bar" id="evidence-tip">
           ${got >= 6 ? '六条线索都在这了。去侦探事务所，把它们钉上墙。' : '每条线索都有两面。'}
@@ -512,18 +579,20 @@
       </div>`;
 
     const frame = $('#spot-frame');
-    const spot = $('#spot-overlay');
-    const moveSpot = e => {
-      const r = frame.getBoundingClientRect();
-      const x = ((e.clientX - r.left) / r.width) * 100;
-      const y = ((e.clientY - r.top) / r.height) * 100;
-      spot.style.setProperty('--mx', x + '%');
-      spot.style.setProperty('--my', y + '%');
-    };
-    frame.addEventListener('pointermove', moveSpot);
-    frame.addEventListener('pointerdown', moveSpot);
-    spot.style.setProperty('--mx', '50%');
-    spot.style.setProperty('--my', '50%');
+    if (!isTouch) {
+      const spot = $('#spot-overlay');
+      const moveSpot = e => {
+        const r = frame.getBoundingClientRect();
+        const x = ((e.clientX - r.left) / r.width) * 100;
+        const y = ((e.clientY - r.top) / r.height) * 100;
+        spot.style.setProperty('--mx', x + '%');
+        spot.style.setProperty('--my', y + '%');
+      };
+      frame.addEventListener('pointermove', moveSpot);
+      frame.addEventListener('pointerdown', moveSpot);
+      spot.style.setProperty('--mx', '50%');
+      spot.style.setProperty('--my', '50%');
+    }
 
     $$('.loc-tab', stage).forEach(b => b.onclick = () => {
       audio.click();
@@ -578,31 +647,41 @@
           </div>
         </div>
       </div>`;
-    const ov = openOverlay(html, { className: 'clue-ov' });
+    const isTouch = window.matchMedia('(pointer: coarse)').matches;
+    const ov = openOverlay(html, { className: 'clue-ov' + (isTouch ? ' drawer' : '') });
     const card = $('#clue-card', ov);
     const sceneWrap = $('.clue-scene', ov);
 
-    // 鼠标 3D 倾斜 + 镭射反光
-    const onMove = e => {
-      if (card.classList.contains('flipped')) return;
-      const r = sceneWrap.getBoundingClientRect();
-      const dx = (e.clientX - r.left) / r.width - 0.5;
-      const dy = (e.clientY - r.top) / r.height - 0.5;
-      sceneWrap.style.transform = `rotateY(${dx * 14}deg) rotateX(${-dy * 12}deg)`;
-      const holo = $('.front .holo', ov);
-      if (holo) {
-        holo.style.backgroundPosition = `${(dx + 0.5) * 100}% ${(dy + 0.5) * 100}%`;
-      }
-    };
-    sceneWrap.addEventListener('mousemove', onMove);
-    sceneWrap.addEventListener('mouseleave', () => { sceneWrap.style.transform = ''; });
+    // 鼠标 3D 倾斜 + 镭射反光（仅桌面端）
+    if (!isTouch) {
+      const onMove = e => {
+        if (card.classList.contains('flipped')) return;
+        const r = sceneWrap.getBoundingClientRect();
+        const dx = (e.clientX - r.left) / r.width - 0.5;
+        const dy = (e.clientY - r.top) / r.height - 0.5;
+        sceneWrap.style.transform = `rotateY(${dx * 14}deg) rotateX(${-dy * 12}deg)`;
+        const holo = $('.front .holo', ov);
+        if (holo) {
+          holo.style.backgroundPosition = `${(dx + 0.5) * 100}% ${(dy + 0.5) * 100}%`;
+        }
+      };
+      sceneWrap.addEventListener('mousemove', onMove);
+      sceneWrap.addEventListener('mouseleave', () => { sceneWrap.style.transform = ''; });
+    }
 
-    $('#flip-btn', ov).onclick = e => {
-      e.stopPropagation();
+    const flip = () => {
       audio.click();
       card.classList.add('flipped');
       sceneWrap.style.transform = '';
     };
+    $('#flip-btn', ov).onclick = e => { e.stopPropagation(); flip(); };
+    // 移动端：点击卡片任意处翻面
+    if (isTouch) {
+      $('.clue-face.front', ov).addEventListener('click', e => {
+        if (e.target.closest('button')) return;
+        flip();
+      });
+    }
     $('#keep-btn', ov).onclick = e => {
       e.stopPropagation();
       audio.click();
@@ -1401,7 +1480,7 @@
       await wait(900);
 
       for (let i = 0; i < 3; i++) {
-        img.src = 'assets/finale/dish_tomato.jpg';
+        img.src = `assets/finale/dish_tomato.${SCENE_EXT}`;
         mirror.classList.add('glitch');
         audio.noise(0.12, 0.07, 2400);
         await wait(230);
@@ -1410,7 +1489,7 @@
         await wait(230);
       }
 
-      img.src = 'assets/finale/dish_tomato.jpg';
+      img.src = `assets/finale/dish_tomato.${SCENE_EXT}`;
       mirror.classList.add('crack');
       audio.noise(0.38, 0.12, 3000);
       audio.heart();
@@ -1489,9 +1568,66 @@
       audio.click();
       openNote(b.dataset.note);
     });
+
+    /* 右键 / 长按呼出复古终端菜单 */
+    let pressTimer = null;
+    const openTermMenu = (clientX, clientY) => {
+      closeTermMenu();
+      const menu = document.createElement('div');
+      menu.className = 'term-menu';
+      menu.innerHTML = `<div class="tm-title">TIME BUREAU · SHELL</div>`;
+      const items = [
+        { label: '查看底层代码', action: () => { toast('底层代码已加密 · 权限不足'); closeTermMenu(); } },
+        { label: '时间管理局协议 #7', action: () => { toast('协议 #7：实验体不得拥有"明天"的概念'); closeTermMenu(); } },
+        { label: '重启实验体 7 名', action: null, locked: true },
+        { label: '退出终端', action: closeTermMenu }
+      ];
+      items.forEach((it, idx) => {
+        const btn = document.createElement('button');
+        btn.className = 'tm-item' + (it.locked ? ' locked' : '');
+        btn.innerHTML = `<span class="tm-label"></span><span class="tm-cursor"></span>`;
+        menu.appendChild(btn);
+        const full = `> ${it.label}${it.locked ? ' [LOCKED]' : ''}`;
+        let ci = 0;
+        setTimeout(() => {
+          const labelEl = btn.querySelector('.tm-label');
+          const typeTimer = setInterval(() => {
+            if (ci < full.length) {
+              labelEl.textContent += full[ci];
+              audio.type();
+              ci++;
+            } else {
+              clearInterval(typeTimer);
+              btn.querySelector('.tm-cursor').remove();
+            }
+          }, 28);
+        }, idx * 120);
+        if (!it.locked) btn.onclick = it.action;
+      });
+      // 定位（避免溢出屏幕）
+      menu.style.left = Math.min(clientX, window.innerWidth - 240) + 'px';
+      menu.style.top = Math.min(clientY, window.innerHeight - 220) + 'px';
+      document.body.appendChild(menu);
+      state._termMenu = menu;
+    };
+    frame.addEventListener('contextmenu', e => { e.preventDefault(); openTermMenu(e.clientX, e.clientY); });
+    frame.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse' && e.button !== 2) return;
+      pressTimer = setTimeout(() => openTermMenu(e.clientX, e.clientY), 600);
+    });
+    frame.addEventListener('pointerup', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } });
+    frame.addEventListener('pointerleave', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } });
+
     const n = $('#to-accuse');
     if (n) n.onclick = () => { audio.click(); act5(); };
   }
+
+  function closeTermMenu() {
+    if (state._termMenu) { state._termMenu.remove(); state._termMenu = null; }
+  }
+  document.addEventListener('click', e => {
+    if (state._termMenu && !e.target.closest('.term-menu')) closeTermMenu();
+  });
 
   function openNote(id) {
     const note = D.cellarNotes[id];
@@ -2000,6 +2136,8 @@
   function act8() {
     chapter('第八幕 · 炸弹');
     setScene('bomb_box');
+    audio.stopAmbient();
+    audio.bombBeat();
     state.timer = 300;
     state.quizIndex = 0;
 
@@ -2054,6 +2192,7 @@
     }, 1000);
 
     function timeUp() {
+      audio.stopBombBeat();
       whiteOut(300);
       audio.boom();
       setTimeout(() => {
@@ -2087,7 +2226,10 @@
         const isLast = idx === D.quiz.length - 1;
         $$('.qopt', opts).forEach(b => b.disabled = true);
         if (chosen === q[2]) {
-          btn.classList.add('right');
+          btn.classList.add('right', 'bounce');
+          /* 答对：齿轮剧烈转动发金光 */
+          timerBox.classList.add('gear-burst');
+          setTimeout(() => timerBox.classList.remove('gear-burst'), 600);
           state.timer = Math.min(state.timer + 10, 900);
           $('#qc-fb').textContent = isLast
             ? '✓ 正确。系统沉默了三秒，然后松开了引线。'
@@ -2100,6 +2242,13 @@
         } else {
           btn.classList.add('wrong');
           $$('.qopt', opts)[q[2]].classList.add('right');
+          /* 答错：全屏剧烈震动 + 齿轮卡死冒黑烟 */
+          document.body.classList.add('quiz-shake');
+          timerBox.classList.add('gear-stuck');
+          setTimeout(() => {
+            document.body.classList.remove('quiz-shake');
+            timerBox.classList.remove('gear-stuck');
+          }, 500);
           state.timer = Math.max(5, state.timer - 5);
           $('#qc-fb').textContent = isLast
             ? '✗ 不对。系统还在等你的回答。'
@@ -2120,6 +2269,7 @@
     function reachTen() {
       if (reached) return;
       reached = true;
+      audio.stopBombBeat();
       clearInterval(state.timerId);
       state.timerId = null;
       state.timer = 600;
@@ -2212,6 +2362,7 @@
     chapter('终幕 · 最后的晚餐');
     setScene('road_outside');
     flashEl.classList.remove('hold', 'on');
+    audio.ambient();
     const html = `
       <div class="ending-wrap">
         <div class="polaroid" id="polaroid">
@@ -2220,17 +2371,31 @@
           </div>
         </div>
         <div class="ending-actions" id="end-actions">
-          <button class="pix-btn primary" id="save-photo">保存合照</button>
+          <div style="position:relative">
+            <div class="end-arrow" id="end-arrow">
+              <span class="ea-txt">点击查看隐藏档案</span>
+              <span class="ea-line"></span>
+              <span class="ea-head"></span>
+            </div>
+            <button class="pix-btn primary" id="save-photo">保存合照</button>
+          </div>
           <button class="pix-btn" id="open-card">打开盒子里的贺卡</button>
           <button class="pix-btn" id="open-3d">3D 角色档案</button>
         </div>
       </div>`;
-    const ov = openOverlay(html, { className: 'ending-ov', closable: false });
+    /* 结局引导：微弱提示音 + 箭头呼吸 */
+    const hintId = setInterval(() => {
+      if (!state.sound) return;
+      audio.tone(880, 0.06, 'triangle', 0.03);
+    }, 1200);
+
+    const ov = openOverlay(html, { className: 'ending-ov', closable: false, onClose: () => clearInterval(hintId) });
     drawGroupPhoto($('#photo-shot', ov));
     spawnPetals(ov);
 
     $('#save-photo', ov).onclick = () => {
       audio.chime();
+      clearInterval(hintId);
       const c = $('#photo-shot', ov);
       c.toBlob(blob => {
         const a = document.createElement('a');
@@ -2250,6 +2415,7 @@
 
   /* -------- 终章：现实硬切 -------- */
   async function startRealFinale(ov) {
+    audio.stopAll();
     const pol = $('#polaroid', ov);
     audio.crunch();
     pol.classList.add('crumple');
@@ -2259,49 +2425,75 @@
     fin.className = 'fin-layer';
     fin.innerHTML = `
       <div class="fin-shot" id="fin-shot"></div>
+      <div class="film-grain" id="fin-grain"></div>
       <div class="fin-caption" id="fin-cap"></div>
       <div class="fin-glitch" id="fin-glitch"></div>`;
     document.body.appendChild(fin);
 
     const shot = $('#fin-shot', fin);
     const cap = $('#fin-cap', fin);
+    const grain = $('#fin-grain', fin);
     const glitch = $('#fin-glitch', fin);
 
-    const dishes = [
-      ['dish_carrot', '红烧胡萝卜块 · 配白萝卜片'],
-      ['dish_eggplant', '油焖茄子'],
-      ['dish_chili', '干煸辣椒'],
-      ['dish_potato', '软烂土豆块'],
-      ['dish_onion', '金黄洋葱圈'],
-      ['dish_fruit', '西瓜果切 · 苹果片']
+    /* 9 帧提线木偶定格序列：首选写实图，缺失时回退到现有菜品图 */
+    const fallback = {
+      table_food: 'dish_carrot',
+      woman_lookdown: 'human_eyes',
+      woman_eat_carrot: 'dish_carrot',
+      woman_eat_eggplant: 'dish_eggplant',
+      woman_eat_chili: 'dish_chili',
+      woman_eat_potato: 'dish_potato',
+      woman_eat_onion: 'dish_onion',
+      woman_eat_fruit: 'dish_fruit',
+      woman_stare: 'human_eyes'
+    };
+    const frames = [
+      ['table_food', '一大桌菜 · 六道菜整齐排列'],
+      ['woman_lookdown', '女人低头看着桌面'],
+      ['woman_eat_carrot', '红烧胡萝卜块'],
+      ['woman_eat_eggplant', '油焖茄子'],
+      ['woman_eat_chili', '干煸双辣椒'],
+      ['woman_eat_potato', '软烂土豆块'],
+      ['woman_eat_onion', '金黄洋葱圈'],
+      ['woman_eat_fruit', '西瓜果切 · 苹果片'],
+      ['woman_stare', '……']
     ];
-    shot.classList.add('dishes', 'on');
-    for (let i = 0; i < dishes.length; i++) {
-      shot.style.backgroundImage = `url(assets/finale/${dishes[i][0]}.jpg)`;
-      cap.textContent = `FINAL DISH · ${String(i + 1).padStart(3, '0')} / ${dishes[i][1]}`;
-      audio.crunch();
-      await wait(500);
+    const imgCache = {};
+    function resolveImg(name) {
+      return new Promise(res => {
+        const tryUrl = `assets/finale/${name}.${SCENE_EXT}`;
+        const probe = new Image();
+        probe.onload = () => res(tryUrl);
+        probe.onerror = () => res(`assets/finale/${fallback[name] || 'dish_carrot'}.${SCENE_EXT}`);
+        probe.src = tryUrl;
+      });
     }
-
-    /* 第 7 张：半颗生鲜番茄，筷子停住了（没有咀嚼声） */
-    shot.classList.remove('dishes');
-    shot.style.backgroundImage = 'url(assets/finale/dish_tomato.jpg)';
-    cap.textContent = 'FINAL DISH · 007 / 半颗生鲜番茄 —— 筷子停住了。';
-    await wait(900);
-
-    /* 人眼：主动看向屏幕 */
-    shot.style.backgroundImage = 'url(assets/finale/human_eyes.jpg)';
-    shot.classList.add('eyes');
-    cap.textContent = '';
-    audio.heart();
-    await wait(1700);
-    audio.heart();
-    await wait(1500);
+    shot.classList.add('dishes', 'on', 'puppet');
+    for (let i = 0; i < frames.length; i++) {
+      const [name, label] = frames[i];
+      const url = imgCache[name] || (imgCache[name] = await resolveImg(name));
+      shot.style.backgroundImage = `url(${url})`;
+      if (i === frames.length - 1) {
+        /* 第 9 帧：女人死盯屏幕 —— 突然放大、颗粒加重、完全静止 */
+        shot.classList.remove('puppet', 'dishes');
+        shot.classList.add('stare');
+        grain.classList.add('heavy');
+        cap.textContent = '';
+        audio.heart();
+        await wait(1500);
+        audio.heart();
+        await wait(1500);
+      } else {
+        cap.textContent = `FINAL DISH · ${String(i + 1).padStart(3, '0')} / ${label}`;
+        audio.crunch();
+        await wait(400);
+      }
+    }
 
     /* 雪花碎裂 → 回到像素广场 */
     glitch.classList.add('on');
     audio.noise(0.9, 0.14, 3000);
-    shot.classList.remove('on', 'eyes');
+    shot.classList.remove('on', 'stare');
     await wait(850);
     fin.remove();
     closeOverlay(ov);
@@ -2614,4 +2806,13 @@
   /* ================= 启动 ================= */
   updateClueBadge();
   bootTitle();
+
+  /* 隐藏启动 Loading（等首屏场景图开始渲染后淡出） */
+  const bootLdr = $('#boot-loader');
+  if (bootLdr) {
+    setTimeout(() => {
+      bootLdr.classList.add('out');
+      setTimeout(() => bootLdr.remove(), 600);
+    }, 700);
+  }
 })();
